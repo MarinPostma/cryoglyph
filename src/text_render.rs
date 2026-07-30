@@ -132,6 +132,7 @@ impl TextRenderer {
                                         if !atlas.grow(
                                             device,
                                             queue,
+                                            encoder,
                                             font_system,
                                             cache,
                                             content_type,
