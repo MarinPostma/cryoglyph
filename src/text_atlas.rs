@@ -115,8 +115,7 @@ impl InnerAtlas {
     pub(crate) fn grow(
         &mut self,
         device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
         _font_system: &mut FontSystem,
         _cache: &mut SwashCache,
     ) -> bool {
@@ -162,7 +161,29 @@ impl InnerAtlas {
         // then either fell short of the slot or overflowed into the
         // neighbour's, corrupting subsequent renders. The texture
         // copy sidesteps the rasterizer entirely and is also faster.
-        encoder.copy_texture_to_texture(
+        //
+        // Submit this copy on its own, right here, instead of recording it
+        // into the caller's (still-open) `CommandEncoder`. `try_allocate`'s
+        // caller (`TextRenderer::prepare_with_depth`) uploads each newly
+        // rasterized glyph via `queue.write_texture`, which is an *immediate*
+        // queue operation guaranteed to execute before any command buffer
+        // submitted afterwards. If this copy were merely recorded into the
+        // shared encoder, it would stay pending until that encoder is
+        // eventually submitted at the end of the frame - by which point
+        // several more `write_texture` uploads (for glyphs allocated into
+        // this very texture, after this grow) may already have landed in
+        // the [0, old_size) region this copy overwrites. Since the deferred
+        // copy would then execute *after* those uploads (its recording
+        // order is irrelevant; only submission order matters relative to
+        // `write_texture` calls), it would silently revert them to
+        // whatever was in that slot before the glyph existed - typically
+        // nothing, i.e. the glyph renders blank. Submitting immediately
+        // guarantees this copy is ordered before any `write_texture` call
+        // made after `grow()` returns.
+        let mut copy_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("glyphon atlas grow"),
+        });
+        copy_encoder.copy_texture_to_texture(
             TexelCopyTextureInfo {
                 texture: &self.texture,
                 mip_level: 0,
@@ -181,6 +202,7 @@ impl InnerAtlas {
                 depth_or_array_layers: 1,
             },
         );
+        queue.submit(std::iter::once(copy_encoder.finish()));
 
         self.texture = new_texture;
         self.texture_view = self.texture.create_view(&TextureViewDescriptor::default());
@@ -306,18 +328,13 @@ impl TextAtlas {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
         font_system: &mut FontSystem,
         cache: &mut SwashCache,
         content_type: ContentType,
     ) -> bool {
         let did_grow = match content_type {
-            ContentType::Mask => self
-                .mask_atlas
-                .grow(device, queue, encoder, font_system, cache),
-            ContentType::Color => self
-                .color_atlas
-                .grow(device, queue, encoder, font_system, cache),
+            ContentType::Mask => self.mask_atlas.grow(device, queue, font_system, cache),
+            ContentType::Color => self.color_atlas.grow(device, queue, font_system, cache),
         };
 
         if did_grow {

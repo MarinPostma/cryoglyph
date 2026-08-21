@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "cryoglyph"
 description = "Fast, simple 2D text rendering for wgpu. A fork of glyphon for iced."
@@ -18,6 +20,11 @@ rustc-hash = "2"
 winit = "0.30"
 pollster = "0.4"
 criterion = { version = "0.5", features = ["html_reports"] }
+# Headless GPU backend for benches/tests (`benches/state.rs`, `tests/`) that
+# create their own wgpu adapter without a display/surface. The main
+# `[dependencies]` entry deliberately enables no backend (that's left to
+# whichever app embeds cryoglyph), so tests need to opt into one themselves.
+wgpu = { version = "29", default-features = false, features = ["wgsl", "metal", "vulkan"] }
 
 [[bench]]
 name = "prepare"
