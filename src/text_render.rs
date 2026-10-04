@@ -90,7 +90,12 @@ impl TextRenderer {
                     let physical_glyph =
                         glyph.physical((text_area.left, text_area.top), text_area.scale);
 
-                    let cache_key = physical_glyph.cache_key;
+                    // Unhinted outlines, like macOS CoreText and browsers there:
+                    // swash's TrueType hinting snaps stems and extents to the
+                    // pixel grid, which renders UI text heavier and taller
+                    // than the same font in the browser.
+                    let mut cache_key = physical_glyph.cache_key;
+                    cache_key.flags |= cosmic_text::CacheKeyFlags::DISABLE_HINTING;
 
                     let details = if let Some(details) =
                         atlas.mask_atlas.glyph_cache.get(&cache_key)
@@ -102,7 +107,7 @@ impl TextRenderer {
                         details
                     } else {
                         let Some(image) =
-                            cache.get_image_uncached(font_system, physical_glyph.cache_key)
+                            cache.get_image_uncached(font_system, cache_key)
                         else {
                             continue;
                         };
